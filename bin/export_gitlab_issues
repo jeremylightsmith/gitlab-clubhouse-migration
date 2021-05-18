@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/gitlab'
+
+if ARGV.length != 2
+  puts 'Usage bin/export_gitlab_issues [group name] [project name]'
+  exit 1
+end
+
+file_cache = 'issues.json'
+
+gitlab = Gitlab.new verbose: true
+
+groups = {}
+gitlab.get('groups').each do |group|
+  groups[group['name']] = group['id']
+end
+
+group_id = groups[ARGV[0]] || raise("can't find group #{ARGV[0]} in #{groups.keys.inspect}")
+
+projects = {}
+gitlab.get("groups/#{group_id}/projects").each do |project|
+  projects[project['name']] = project['id']
+end
+
+project_id = projects[ARGV[1]] || raise("can't find project #{ARGV[1]} in #{projects.keys.inspect}")
+
+issues = []
+gitlab.get_each("projects/#{project_id}/issues?scope=all") do |issue|
+  print '.'
+  issues << issue
+end
+
+puts "Read #{issues.length} issues"
+
+File.write(file_cache, Yajl::Encoder.encode(issues))

@@ -1,0 +1,118 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/clubhouse'
+require 'yajl'
+
+def translate_labels(issue)
+  project_and_state = []
+  labels = []
+  story_type = 'feature'
+  issue['labels'].each do |label|
+    case label
+    when 'Incoming Requests', 'Prospects', 'Sales Engineering', 'EEOC 🧗‍♀️', 'Tech Tasks and Spikes', 'Exec Dashboard 🧗‍♀️',
+      'BAU/Wall/Analytics 🧗‍♀️', 'Up next', 'This Week', 'Today', 'In Progress', 'Dev Finished 🙌',
+      'Merged', 'Done / Ready for Release'
+      project_and_state << ['Locomotiva', label]
+
+    when 'Tier 2 Customer Support'
+      project_and_state << ['Tier 2 Customer Support', 'Unstarted']
+
+    when 'CS Tasks'
+      project_and_state << ['Customer Support', 'Unstarted']
+
+    when 'Bug 🐞'
+      story_type = 'bug'
+
+    when 'TechTask'
+      story_type = 'chore'
+
+    else
+      labels << label
+    end
+  end
+
+  if project_and_state.length == 0
+    print "[no state for #{issue['labels'].join(',')}]"
+  elsif project_and_state.length > 1
+    print "[ambiguous #{issue['labels'].join(',')} -> #{project_and_state}]"
+  end
+  project, state = project_and_state.first || [nil, nil]
+  [project, state, story_type, labels]
+end
+
+file_cache = 'issues.json'
+
+issues = Yajl::Parser.new.parse(File.new(file_cache, 'r'))
+clubhouse = Clubhouse.new verbose: true
+
+puts "issues = #{issues.count}"
+
+projects = {}
+clubhouse.get('projects').each do |project|
+  projects[project['name']] = project['id']
+end
+puts "projects = #{projects.inspect}"
+
+states = {}
+clubhouse.get('workflows').each do |workflow|
+  workflow['states'].each do |state|
+    states[state['name']] = state['id']
+  end
+end
+puts "states = #{states.inspect}"
+
+issues.each do |issue|
+  if issue['state'] == 'closed' # let's not import stories that are complete
+    puts 'closed'
+    next
+  end
+
+  project, state, story_type, labels = translate_labels(issue)
+
+  story = {
+    archived: false,
+    created_at: issue['created_at'],
+    updated_at: issue['updated_at'],
+    description: issue['description'] || '',
+    deadline: issue['due_date'],
+    name: issue['title'],
+    project_id: projects[project] || raise("can't find project #{project}"),
+    workflow_state_id: states[state] || raise("can't find state #{state}"),
+    story_type: story_type,
+    labels: labels.map { |l| { name: l } }
+
+    #  comments: [{ author_id: '12345678-9012-3456-7890-123456789012',
+    #               created_at: '2016-12-31T12:30:00Z',
+    #               external_id: 'foo',
+    #               text: null,
+    #               updated_at: '2016-12-31T12:30:00Z' }],
+    #  completed_at_override: '2016-12-31T12:30:00Z',
+    #  epic_id: 123,
+    #  estimate: 123,
+    #  external_id: 'foo',
+    #  external_links: [],
+    #  file_ids: [123],
+    #  follower_ids: ['12345678-9012-3456-7890-123456789012'],
+    #  group_id: '12345678-9012-3456-7890-123456789012',
+    #  iteration_id: 123,
+    #  labels: [{ color: '#6515dd',
+    #             description: 'foo',
+    #             external_id: 'foo',
+    #             name: null }],
+    #  linked_file_ids: [123],
+    #  owner_ids: ['12345678-9012-3456-7890-123456789012'],
+    #  requested_by_id: '12345678-9012-3456-7890-123456789012',
+    #  started_at_override: '2016-12-31T12:30:00Z',
+    #  story_links: [{ object_id: 123,
+    #                  subject_id: 123,
+    #                  verb: 'blocks' }],
+    #  tasks: [{ complete: true,
+    #            created_at: '2016-12-31T12:30:00Z',
+    #            description: 'foo',
+    #            external_id: 'foo',
+    #            owner_ids: ['12345678-9012-3456-7890-123456789012'],
+    #            updated_at: '2016-12-31T12:30:00Z' }],
+  }
+
+  clubhouse.post('stories', story)
+end

@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/clubhouse'
+
+clubhouse = Clubhouse.new verbose: true
+
+ids = []
+%w[feature bug chore].each do |type|
+  done = false
+  until done
+    done = true
+    result = clubhouse.get('search/stories', { page_size: 25, query: "type:#{type}" })
+    result['data'].each do |story|
+      done = false # when there are no more stories that were deleted, stop iterating
+      ids << story['id']
+      clubhouse.delete("stories/#{story['id']}")
+      print '.'
+    end
+  end
+end
+
+puts "#{ids.count} stories deleted"
